@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, History, TrendingUp, MessageSquare, Users, Award, LogOut, Flame, BookOpen, CheckCircle2, AlertCircle, Sparkles, Trash2, Coins, Snowflake } from 'lucide-react';
 import { User, Feedback } from '../types';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { useCMS } from './CMSContext';
 
 import { 
   db, 
