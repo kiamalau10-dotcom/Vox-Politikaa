@@ -16,6 +16,8 @@ import Quiz from './components/Quiz';
 import Dashboard from './components/Dashboard';
 import ProgramSection from './components/ProgramSection';
 import { MessageSquare, Send } from 'lucide-react';
+import { db, doc, onSnapshot, OperationType, handleFirestoreError } from './firebase';
+import ErrorBoundary from './components/ErrorBoundary';
 
 import { CMSProvider, useCMS } from './components/CMSContext';
 
@@ -208,6 +210,25 @@ const AppContent: React.FC = () => {
     setActiveSection(AppSection.HOME);
   };
 
+  // Sync currentUser from Firestore in real-time
+  useEffect(() => {
+    if (isLoggedIn && currentUser?.username) {
+      const docId = currentUser.username.replace('@', '');
+      const path = `users/${docId}`;
+      const unsubscribe = onSnapshot(doc(db, 'users', docId), (docSnap) => {
+        if (docSnap.exists()) {
+          const userData = docSnap.data() as User;
+          setCurrentUser(userData);
+          localStorage.setItem("currentUser", JSON.stringify(userData));
+          localStorage.setItem(`user_data_${userData.username}`, JSON.stringify(userData));
+        }
+      }, (error) => {
+        handleFirestoreError(error, OperationType.GET, path);
+      });
+      return () => unsubscribe();
+    }
+  }, [isLoggedIn, currentUser?.username]);
+
   // Sync currentUser from localStorage (for updates from other components)
   useEffect(() => {
     const handleStorageChange = () => {
@@ -217,11 +238,8 @@ const AppContent: React.FC = () => {
       }
     };
     window.addEventListener('storage', handleStorageChange);
-    // Also poll for local changes since 'storage' event only fires for other windows
-    const interval = setInterval(handleStorageChange, 1000);
     return () => {
       window.removeEventListener('storage', handleStorageChange);
-      clearInterval(interval);
     };
   }, []);
 
@@ -438,9 +456,11 @@ const AppContent: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <CMSProvider>
-      <AppContent />
-    </CMSProvider>
+    <ErrorBoundary>
+      <CMSProvider>
+        <AppContent />
+      </CMSProvider>
+    </ErrorBoundary>
   );
 };
 

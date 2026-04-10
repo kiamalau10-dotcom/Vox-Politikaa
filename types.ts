@@ -109,6 +109,13 @@ export interface User {
   };
   equippedCostumeId?: string;
   voxTitle?: string;
+  uid?: string;
+  achievements?: {
+    id: string;
+    title: string;
+    date: string;
+    icon: string;
+  }[];
 }
 
 export interface Feedback {

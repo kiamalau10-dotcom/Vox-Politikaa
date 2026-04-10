@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user progress, social data, and settings.",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string", "description": "Unique @username" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["ADMIN", "USER"] },
+        "level": { "type": "number" },
+        "currentExp": { "type": "number" },
+        "streak": { "type": "number" },
+        "lastLoginDate": { "type": "string", "format": "date" },
+        "coins": { "type": "number" },
+        "streakFreezeCount": { "type": "number" },
+        "followers": { "type": "array", "items": { "type": "string" } },
+        "following": { "type": "array", "items": { "type": "string" } },
+        "equippedCostumeId": { "type": "string" },
+        "voxTitle": { "type": "string" },
+        "lastActive": { "type": "string", "format": "date-time" }
+      },
+      "required": ["username", "displayName", "role"]
+    },
+    "Post": {
+      "title": "Social Post",
+      "description": "A post in the Vox Circle feed.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "displayName": { "type": "string" },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "likes": { "type": "array", "items": { "type": "string" } },
+        "comments": { "type": "array", "items": { "type": "object" } },
+        "shares": { "type": "number" }
+      },
+      "required": ["username", "content", "timestamp"]
+    },
+    "GlobalStats": {
+      "title": "Global Analytics",
+      "description": "Aggregated stats for the admin dashboard.",
+      "type": "object",
+      "properties": {
+        "totalUsers": { "type": "number" },
+        "activeUsers": { "type": "number" },
+        "totalVotes": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile data."
+    },
+    "/posts/{postId}": {
+      "schema": "Post",
+      "description": "Vox Circle posts."
+    },
+    "/stats/global": {
+      "schema": "GlobalStats",
+      "description": "Global application statistics."
+    }
+  }
+}
