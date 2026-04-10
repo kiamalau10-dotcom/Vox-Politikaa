@@ -4,7 +4,17 @@ import { Shield, History, TrendingUp, MessageSquare, Users, Award, LogOut, Flame
 import { User, Feedback } from '../types';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 
-import { useCMS } from './CMSContext';
+import { 
+  db, 
+  collection, 
+  onSnapshot, 
+  doc, 
+  deleteDoc, 
+  getDocs,
+  writeBatch,
+  OperationType,
+  handleFirestoreError
+} from '../firebase';
 
 const StreakFire: React.FC<{ count: number; isPopping: boolean }> = ({ count, isPopping }) => {
   return (
@@ -232,6 +242,9 @@ const Dashboard: React.FC<{
   const role = currentUser?.role;
   const username = currentUser?.username;
 
+  const [activeTab, setActiveTab] = useState<'overview' | 'friends'>('overview');
+  const [friendTab, setFriendTab] = useState<'followers' | 'following'>('followers');
+
   // --- STREAK LOGIC ---
   const [streakData, setStreakData] = useState(() => {
     if (!currentUser) return { count: 1, lastLogin: '' };
@@ -334,25 +347,8 @@ const Dashboard: React.FC<{
     ];
   });
 
-  const [usersList, setUsersList] = useState<User[]>(() => {
-    const allUsers = JSON.parse(localStorage.getItem('all_users') || '[]');
-    if (allUsers.length > 0) return allUsers;
-
-    // Fallback to scanning localStorage if all_users is empty
-    const foundUsers: User[] = [];
-    const keys = Object.keys(localStorage);
-    keys.forEach(key => {
-      if (key.startsWith('user_data_')) {
-        try {
-          const u = JSON.parse(localStorage.getItem(key) || '');
-          foundUsers.push(u);
-        } catch (e) {
-          console.error("Error parsing user data", e);
-        }
-      }
-    });
-    return foundUsers;
-  });
+  const [usersList, setUsersList] = useState<User[]>([]);
+  const [liveStats, setLiveStats] = useState({ activeNow: 0, votesToday: 0, newUsersToday: 0 });
 
   // Dynamic Usage Data for Admin Graphs
   const usageData = useMemo(() => {
@@ -373,19 +369,72 @@ const Dashboard: React.FC<{
     return data;
   }, [usersList.length]);
 
-  const handleRemoveUser = (usernameToRemove: string) => {
+  // Real-time Users List and Stats
+  useEffect(() => {
+    if (role === 'ADMIN' && currentUser) {
+      const usersPath = 'users';
+      const unsubscribeUsers = onSnapshot(collection(db, usersPath), (snapshot) => {
+        const users = snapshot.docs.map(doc => doc.data() as User);
+        setUsersList(users);
+        
+        // Calculate stats
+        const now = new Date();
+        const today = now.toISOString().split('T')[0];
+        const newUsers = users.filter(u => u.lastLoginDate === today).length;
+        
+        setLiveStats(prev => ({
+          ...prev,
+          activeNow: Math.floor(users.length * 0.3) + 1, // Simulated active users based on total
+          newUsersToday: newUsers
+        }));
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, usersPath);
+      });
+
+      const postsPath = 'posts';
+      const unsubscribePosts = onSnapshot(collection(db, postsPath), (snapshot) => {
+        setLiveStats(prev => ({
+          ...prev,
+          votesToday: snapshot.size
+        }));
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, postsPath);
+      });
+
+      return () => {
+        unsubscribeUsers();
+        unsubscribePosts();
+      };
+    }
+  }, [role, currentUser]);
+
+  const handleRemoveUser = async (usernameToRemove: string) => {
     if (window.confirm(`Apakah Anda yakin ingin menghapus user "${usernameToRemove}"? Semua data kuis dan progres akan hilang.`)) {
-      localStorage.removeItem(`user_data_${usernameToRemove}`);
-      
-      const allUsers = JSON.parse(localStorage.getItem('all_users') || '[]');
-      const updatedAllUsers = allUsers.filter((u: any) => u.username !== usernameToRemove);
-      localStorage.setItem('all_users', JSON.stringify(updatedAllUsers));
-      
-      const allResults = JSON.parse(localStorage.getItem('all_quiz_results') || '[]');
-      const filteredResults = allResults.filter((r: any) => r.username !== usernameToRemove);
-      localStorage.setItem('all_quiz_results', JSON.stringify(filteredResults));
-      
-      setUsersList(updatedAllUsers);
+      try {
+        const docId = usernameToRemove.replace('@', '');
+        await deleteDoc(doc(db, 'users', docId));
+        alert("User berhasil dihapus.");
+      } catch (error) {
+        console.error("Error removing user: ", error);
+        alert("Gagal menghapus user.");
+      }
+    }
+  };
+
+  const handleClearAllPosts = async () => {
+    if (window.confirm("PERINGATAN: Ini akan menghapus SEMUA postingan di VoxCircle secara global. Lanjutkan?")) {
+      try {
+        const snapshot = await getDocs(collection(db, 'posts'));
+        const batch = writeBatch(db);
+        snapshot.docs.forEach((doc) => {
+          batch.delete(doc.ref);
+        });
+        await batch.commit();
+        alert("Semua postingan telah dihapus.");
+      } catch (error) {
+        console.error("Error clearing posts: ", error);
+        alert("Gagal menghapus postingan.");
+      }
     }
   };
 
@@ -444,26 +493,6 @@ const Dashboard: React.FC<{
   const [isVoxStudioEnabled, setIsVoxStudioEnabled] = useState(false);
   const [showAvatarSelector, setShowAvatarSelector] = useState(false);
   
-  // REAL-TIME SIMULATION FOR ADMIN
-  const [liveStats, setLiveStats] = useState(() => ({
-    activeNow: Math.floor(Math.random() * 50) + 10,
-    votesToday: Math.floor(Math.random() * 1000) + 500,
-    newUsersToday: Math.floor(Math.random() * 20) + 5
-  }));
-
-  useEffect(() => {
-    if (role === 'ADMIN') {
-      const interval = setInterval(() => {
-        setLiveStats(prev => ({
-          activeNow: Math.max(5, prev.activeNow + (Math.random() > 0.5 ? 1 : -1)),
-          votesToday: prev.votesToday + (Math.random() > 0.7 ? 1 : 0),
-          newUsersToday: prev.newUsersToday + (Math.random() > 0.95 ? 1 : 0)
-        }));
-      }, 3000);
-      return () => clearInterval(interval);
-    }
-  }, [role]);
-
   const myPosts = useMemo(() => {
     const savedPosts = JSON.parse(localStorage.getItem('vox_circle_posts') || '[]');
     return savedPosts
@@ -795,7 +824,29 @@ const Dashboard: React.FC<{
         </div>
         {/* RIGHT COLUMN: History or Admin Lists */}
         <div className="lg:col-span-2 space-y-8">
-          {role === 'USER' ? (
+          {/* Tab Navigation */}
+          <div className="flex gap-4 mb-4">
+            <button 
+              onClick={() => setActiveTab('overview')}
+              className={`px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${
+                activeTab === 'overview' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'bg-black/5 opacity-50 hover:opacity-100'
+              }`}
+            >
+              Overview
+            </button>
+            <button 
+              onClick={() => setActiveTab('friends')}
+              className={`px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${
+                activeTab === 'friends' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'bg-black/5 opacity-50 hover:opacity-100'
+              }`}
+            >
+              Teman ({ (currentUser?.followers?.length || 0) + (currentUser?.following?.length || 0) })
+            </button>
+          </div>
+
+          {activeTab === 'overview' ? (
+            <>
+              {role === 'USER' ? (
             <div className="space-y-8">
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
@@ -824,6 +875,37 @@ const Dashboard: React.FC<{
                     <p className="text-[10px] font-bold uppercase opacity-50 mb-1">Kelemahan</p>
                     <p className="text-xs font-black uppercase">{reportCard?.weakness}</p>
                   </div>
+                </div>
+              </motion.div>
+
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.25 }}
+                className={`p-8 rounded-[2.5rem] border ${isDarkMode ? 'bg-zinc-900/50 border-white/10' : 'bg-white border-black/5 shadow-xl'}`}
+              >
+                <div className="flex items-center gap-3 mb-8">
+                  <Award size={24} className="text-yellow-500" />
+                  <h3 className="text-2xl font-black uppercase italic">Pencapaian</h3>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {currentUser?.achievements && currentUser.achievements.length > 0 ? (
+                    currentUser.achievements.map((ach) => (
+                      <div key={ach.id} className="p-4 rounded-2xl bg-yellow-500/5 border border-yellow-500/10 flex items-center gap-4">
+                        <div className="w-10 h-10 bg-yellow-500 rounded-xl flex items-center justify-center shrink-0">
+                          <Award size={20} className="text-black" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black uppercase leading-tight">{ach.title}</p>
+                          <p className="text-[8px] font-bold opacity-50 uppercase">{new Date(ach.date).toLocaleDateString()}</p>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="col-span-full py-8 text-center border-2 border-dashed border-black/5 rounded-2xl">
+                      <p className="text-[10px] font-bold uppercase opacity-30 italic">Belum ada pencapaian. Teruslah belajar!</p>
+                    </div>
+                  )}
                 </div>
               </motion.div>
 
@@ -932,7 +1014,6 @@ const Dashboard: React.FC<{
 
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
-                initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
                 className={`p-8 rounded-[2.5rem] border ${isDarkMode ? 'bg-zinc-900/50 border-white/10' : 'bg-white border-black/5 shadow-xl'}`}
@@ -990,7 +1071,15 @@ const Dashboard: React.FC<{
                       <Users size={24} className="text-red-600" />
                       <h3 className="text-2xl font-black uppercase italic">Daftar Pengguna</h3>
                     </div>
-                    <span className="text-[10px] font-black uppercase opacity-50">{usersList.length} Total</span>
+                    <div className="flex items-center gap-4">
+                      <button 
+                        onClick={handleClearAllPosts}
+                        className="px-4 py-2 bg-red-600/10 text-red-600 rounded-xl text-[10px] font-black uppercase hover:bg-red-600 hover:text-white transition-all"
+                      >
+                        Reset VoxCircle
+                      </button>
+                      <span className="text-[10px] font-black uppercase opacity-50">{usersList.length} Total</span>
+                    </div>
                   </div>
                   <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                     {usersList.map((user) => (
@@ -1045,7 +1134,77 @@ const Dashboard: React.FC<{
               </div>
             </div>
           )}
-        </div>
+        </>
+      ) : (
+        /* Friends List View */
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`p-10 rounded-[2.5rem] border ${isDarkMode ? 'bg-zinc-900/50 border-white/10' : 'bg-white border-black/5 shadow-xl'}`}
+        >
+          <div className="flex gap-8 border-b border-black/5 dark:border-white/5 mb-8">
+            <button 
+              onClick={() => setFriendTab('followers')}
+              className={`pb-4 font-black text-xs uppercase tracking-widest transition-all relative ${
+                friendTab === 'followers' ? 'text-red-600' : 'opacity-50'
+              }`}
+            >
+              Followers ({currentUser?.followers?.length || 0})
+              {friendTab === 'followers' && <motion.div layoutId="friendTab" className="absolute bottom-0 left-0 right-0 h-1 bg-red-600" />}
+            </button>
+            <button 
+              onClick={() => setFriendTab('following')}
+              className={`pb-4 font-black text-xs uppercase tracking-widest transition-all relative ${
+                friendTab === 'following' ? 'text-red-600' : 'opacity-50'
+              }`}
+            >
+              Following ({currentUser?.following?.length || 0})
+              {friendTab === 'following' && <motion.div layoutId="friendTab" className="absolute bottom-0 left-0 right-0 h-1 bg-red-600" />}
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            {(friendTab === 'followers' ? currentUser?.followers : currentUser?.following)?.length === 0 ? (
+              <div className="text-center py-12 opacity-50 font-bold uppercase tracking-widest text-xs">
+                Belum ada {friendTab === 'followers' ? 'pengikut' : 'yang diikuti'}.
+              </div>
+            ) : (
+              (friendTab === 'followers' ? currentUser?.followers : currentUser?.following)?.map((friendUsername) => (
+                <div key={friendUsername} className="flex items-center justify-between p-4 rounded-2xl bg-black/5 hover:bg-black/10 transition-all">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl overflow-hidden border-2 border-red-600/20">
+                      <img 
+                        src={`https://api.dicebear.com/9.x/adventurer/svg?seed=${friendUsername.replace('@', '')}&backgroundColor=f8fafc,f1f5f9&radius=20`}
+                        alt={friendUsername}
+                        className="w-full h-full object-contain"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                    <div>
+                      <p className="font-bold uppercase tracking-tight">{friendUsername}</p>
+                      <p className="text-[10px] font-bold text-red-600 uppercase">Warga Aktif</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      // Navigate to VoxCircle and filter for this user
+                      (window as any).setActiveSection('home');
+                      setTimeout(() => {
+                        const voxCircle = document.getElementById('vox-circle');
+                        if (voxCircle) voxCircle.scrollIntoView({ behavior: 'smooth' });
+                      }, 500);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-red-600 text-white font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all"
+                  >
+                    Lihat Profil
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </motion.div>
+      )}
+    </div>
       </div>
 
       <AnimatePresence>

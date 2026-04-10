@@ -1,8 +1,91 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle2, XCircle, Trophy, ArrowRight, RotateCcw, ShieldAlert, Medal } from 'lucide-react';
+import { CheckCircle2, XCircle, Trophy, ArrowRight, RotateCcw, ShieldAlert, Medal, Zap, Star, Mountain } from 'lucide-react';
 import { Question, User } from '../types';
 import { ALL_QUESTIONS } from '../services/quizData';
+import { 
+  db, 
+  collection, 
+  query, 
+  orderBy, 
+  limit, 
+  onSnapshot, 
+  updateDoc, 
+  doc, 
+  getDoc,
+  OperationType,
+  handleFirestoreError
+} from '../firebase';
+
+const MountainTracker: React.FC<{ level: number, isDarkMode: boolean }> = ({ level, isDarkMode }) => {
+  const levels = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  return (
+    <div className={`p-8 rounded-[2.5rem] border ${isDarkMode ? 'bg-zinc-900/30 border-white/5' : 'bg-gray-50 border-black/5'}`}>
+      <div className="flex items-center gap-3 mb-8">
+        <Mountain className="text-red-600" />
+        <h3 className="text-xl font-black uppercase italic">Puncak Literasi</h3>
+      </div>
+      <div className="relative h-40 flex items-end justify-between px-4">
+        {/* Mountain Path */}
+        <div className="absolute bottom-4 left-0 right-0 h-1 bg-black/5 dark:bg-white/5" />
+        {levels.map((l) => {
+          const isActive = l <= level;
+          const isCurrent = l === level;
+          const height = 20 + (l * 10);
+          return (
+            <div key={l} className="relative flex flex-col items-center group">
+              <motion.div 
+                initial={{ height: 0 }}
+                animate={{ height: `${height}px` }}
+                className={`w-1 rounded-t-full transition-all duration-500 ${isActive ? 'bg-red-600' : 'bg-black/10 dark:bg-white/10'}`}
+              />
+              <div className={`mt-2 w-6 h-6 rounded-lg flex items-center justify-center text-[8px] font-black ${
+                isCurrent ? 'bg-red-600 text-white shadow-lg shadow-red-600/40 scale-125 z-10' : 
+                isActive ? 'bg-red-600/20 text-red-600' : 'bg-black/5 dark:bg-white/5 opacity-30'
+              }`}>
+                {l}
+              </div>
+              {isCurrent && (
+                <motion.div 
+                  animate={{ y: [0, -5, 0] }}
+                  transition={{ repeat: Infinity, duration: 2 }}
+                  className="absolute -top-8"
+                >
+                  <Trophy size={14} className="text-yellow-500" />
+                </motion.div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-center mt-6 text-[10px] font-black uppercase opacity-40 tracking-widest">
+        Daki terus untuk mencapai Puncak Demokrasi
+      </p>
+    </div>
+  );
+};
+
+const AchievementPopup: React.FC<{ title: string, icon: string, onClose: () => void }> = ({ title, icon, onClose }) => (
+  <motion.div 
+    initial={{ opacity: 0, scale: 0.5, y: 100 }}
+    animate={{ opacity: 1, scale: 1, y: 0 }}
+    exit={{ opacity: 0, scale: 0.5, y: 100 }}
+    className="fixed bottom-12 left-1/2 -translate-x-1/2 z-[200] w-full max-w-sm px-6"
+  >
+    <div className="bg-zinc-900 border-2 border-yellow-500 p-6 rounded-3xl shadow-2xl flex items-center gap-6">
+      <div className="w-16 h-16 bg-yellow-500 rounded-2xl flex items-center justify-center shrink-0 shadow-lg shadow-yellow-500/20">
+        {icon === 'Star' ? <Star size={32} className="text-black" /> : <Zap size={32} className="text-black" />}
+      </div>
+      <div>
+        <p className="text-[10px] font-black text-yellow-500 uppercase tracking-widest mb-1">Pencapaian Baru!</p>
+        <h4 className="text-xl font-black text-white uppercase italic leading-tight">{title}</h4>
+      </div>
+      <button onClick={onClose} className="ml-auto text-white/50 hover:text-white">
+        <XCircle size={20} />
+      </button>
+    </div>
+  </motion.div>
+);
 
 const Quiz: React.FC<{ 
   isDarkMode: boolean, 
@@ -18,33 +101,27 @@ const Quiz: React.FC<{
   const [history, setHistory] = useState<{ q: string, correct: boolean, explanation: string }[]>([]);
   const [showExitWarning, setShowExitWarning] = useState(false);
   const [leaderboardData, setLeaderboardData] = useState<User[]>([]);
+  const [achievement, setAchievement] = useState<{ title: string, icon: string } | null>(null);
 
   useEffect(() => {
-    const fetchLeaderboard = () => {
-      const allUsers: User[] = [];
-      const keys = Object.keys(localStorage);
-      keys.forEach(key => {
-        if (key.startsWith('user_data_')) {
-          try {
-            const data = JSON.parse(localStorage.getItem(key) || '');
-            if (data.username) allUsers.push(data);
-          } catch (e) {
-            console.error("Error parsing user data", e);
-          }
-        }
-      });
+    if (!currentUser) return;
+    const path = 'users';
+    const q = query(
+      collection(db, path),
+      orderBy('level', 'desc'),
+      orderBy('currentExp', 'desc'),
+      limit(5)
+    );
 
-      const sorted = allUsers
-        .sort((a, b) => {
-          if (b.level !== a.level) return b.level - a.level;
-          return b.currentExp - a.currentExp;
-        })
-        .slice(0, 5);
-      setLeaderboardData(sorted);
-    };
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const users = snapshot.docs.map(doc => doc.data() as User);
+      setLeaderboardData(users);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    });
 
-    fetchLeaderboard();
-  }, [currentStep]);
+    return () => unsubscribe();
+  }, [currentUser]);
 
   useEffect(() => {
     if (onStateChange) {
@@ -150,52 +227,74 @@ const Quiz: React.FC<{
     }
   };
 
-  const finishQuiz = () => {
+  const finishQuiz = async () => {
     const finalScore = Math.round((correctCount / questions.length) * 100);
     const expGained = correctCount * 10;
     const coinsGained = Math.floor(finalScore * 0.5);
     
     if (currentUser) {
-      const updatedUser = { ...currentUser };
+      const docId = currentUser.username.replace('@', '');
+      const userRef = doc(db, 'users', docId);
       
-      // Update EXP & Coins
-      updatedUser.currentExp += expGained;
-      updatedUser.coins = (updatedUser.coins || 0) + coinsGained;
-      
-      // Level Up Logic
-      const expNeeded = updatedUser.level * 100;
-      if (finalScore >= 80) {
-        if (updatedUser.currentExp >= expNeeded) {
-          updatedUser.level += 1;
-          updatedUser.currentExp -= expNeeded;
-        } else {
-          // Force level up if score >= 80 as per requirement "Jika user mendapat skor >= 80, user naik ke level berikutnya"
-          updatedUser.level += 1;
-          // Keep current exp or reset? Usually keep.
+      try {
+        const userDoc = await getDoc(userRef);
+        if (userDoc.exists()) {
+          const userData = userDoc.data() as User;
+          const updatedUser = { ...userData };
+          
+          updatedUser.currentExp += expGained;
+          updatedUser.coins = (updatedUser.coins || 0) + coinsGained;
+          
+          let leveledUp = false;
+          const expNeeded = updatedUser.level * 100;
+          if (finalScore >= 80) {
+            updatedUser.level += 1;
+            leveledUp = true;
+            if (updatedUser.currentExp >= expNeeded) {
+              updatedUser.currentExp -= expNeeded;
+            }
+          } else if (updatedUser.currentExp >= expNeeded) {
+            updatedUser.level += 1;
+            updatedUser.currentExp -= expNeeded;
+            leveledUp = true;
+          }
+
+          const quizResult = {
+            quizId: `quiz_${Date.now()}`,
+            score: finalScore,
+            date: new Date().toISOString(),
+            topic: "Literasi Politik"
+          };
+          updatedUser.quizHistory = [quizResult, ...updatedUser.quizHistory].slice(0, 50);
+
+          // Achievement Check
+          if (leveledUp && updatedUser.level === 5) {
+            const ach = { id: 'level_5', title: 'Warga Terpelajar', date: new Date().toISOString(), icon: 'Star' };
+            updatedUser.achievements = [...(updatedUser.achievements || []), ach];
+            setAchievement({ title: ach.title, icon: ach.icon });
+          } else if (finalScore === 100) {
+            const ach = { id: 'perfect_score', title: 'Politikus Jenius', date: new Date().toISOString(), icon: 'Zap' };
+            if (!(updatedUser.achievements || []).find(a => a.id === ach.id)) {
+              updatedUser.achievements = [...(updatedUser.achievements || []), ach];
+              setAchievement({ title: ach.title, icon: ach.icon });
+            }
+          }
+
+          await updateDoc(userRef, {
+            currentExp: updatedUser.currentExp,
+            coins: updatedUser.coins,
+            level: updatedUser.level,
+            quizHistory: updatedUser.quizHistory,
+            achievements: updatedUser.achievements || []
+          });
+
+          // Sync local storage
+          localStorage.setItem(`user_data_${updatedUser.username}`, JSON.stringify(updatedUser));
+          localStorage.setItem("currentUser", JSON.stringify(updatedUser));
         }
+      } catch (error) {
+        console.error("Error updating quiz results: ", error);
       }
-
-      // Update History
-      const quizResult = {
-        quizId: `quiz_${Date.now()}`,
-        score: finalScore,
-        date: new Date().toISOString(),
-        topic: "Literasi Politik"
-      };
-      updatedUser.quizHistory = [quizResult, ...updatedUser.quizHistory];
-
-      // Save to localStorage
-      localStorage.setItem(`user_data_${updatedUser.username}`, JSON.stringify(updatedUser));
-      localStorage.setItem("currentUser", JSON.stringify(updatedUser));
-      
-      // Update global results for admin
-      const allResults = JSON.parse(localStorage.getItem('all_quiz_results') || '[]');
-      localStorage.setItem('all_quiz_results', JSON.stringify([{
-        username: updatedUser.username,
-        score: finalScore,
-        date: new Date().toISOString(),
-        level: updatedUser.level
-      }, ...allResults]));
     }
 
     setCurrentStep('result');
@@ -247,32 +346,44 @@ const Quiz: React.FC<{
               </button>
             </div>
 
-            {/* Leaderboard Section */}
-            <div className={`p-10 rounded-[2.5rem] border ${
-              isDarkMode ? 'bg-zinc-900/30 border-white/5' : 'bg-gray-50 border-black/5'
-            }`}>
-              <div className="flex items-center gap-3 mb-8">
-                <Medal className="text-yellow-500" />
-                <h3 className="text-xl font-black uppercase italic">Peringkat Nasional</h3>
-              </div>
-              <div className="space-y-4">
-                {leaderboardData.map((user, idx) => (
-                  <div key={user.username} className={`flex items-center justify-between p-4 rounded-2xl ${
-                    idx === 0 ? 'bg-yellow-500/10 border border-yellow-500/20' : 
-                    isDarkMode ? 'bg-white/5' : 'bg-white'
-                  }`}>
-                    <div className="flex items-center gap-4">
-                      <span className="text-lg font-black opacity-30">#{idx + 1}</span>
-                      <div>
-                        <p className="font-bold uppercase tracking-tight">{user.username}</p>
-                        <p className="text-[10px] font-bold text-zinc-500 uppercase">Level {user.level}</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <MountainTracker level={currentUser?.level || 1} isDarkMode={isDarkMode} />
+              
+              {/* Leaderboard Section */}
+              <div className={`p-10 rounded-[2.5rem] border ${
+                isDarkMode ? 'bg-zinc-900/30 border-white/5' : 'bg-gray-50 border-black/5'
+              }`}>
+                <div className="flex items-center gap-3 mb-8">
+                  <Medal className="text-yellow-500" />
+                  <h3 className="text-xl font-black uppercase italic">Peringkat Nasional</h3>
+                </div>
+                <div className="space-y-4">
+                  {leaderboardData.map((user, idx) => (
+                    <div key={user.username} className={`flex items-center justify-between p-4 rounded-2xl ${
+                      idx === 0 ? 'bg-yellow-500/10 border border-yellow-500/20' : 
+                      isDarkMode ? 'bg-white/5' : 'bg-white'
+                    }`}>
+                      <div className="flex items-center gap-4">
+                        <span className="text-lg font-black opacity-30">#{idx + 1}</span>
+                        <div className="w-8 h-8 rounded-lg overflow-hidden border border-black/5">
+                          <img 
+                            src={`https://api.dicebear.com/9.x/adventurer/svg?seed=${user.username.replace('@', '')}&backgroundColor=f8fafc,f1f5f9&radius=20`}
+                            alt={user.username}
+                            className="w-full h-full object-contain"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <div>
+                          <p className="font-bold uppercase tracking-tight">{user.username}</p>
+                          <p className="text-[10px] font-bold text-zinc-500 uppercase">Level {user.level}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs font-black text-red-600 uppercase">{user.currentExp} EXP</p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs font-black text-red-600 uppercase">{user.currentExp} EXP</p>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
           </motion.div>
@@ -409,6 +520,17 @@ const Quiz: React.FC<{
               </button>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Achievement Popup */}
+      <AnimatePresence>
+        {achievement && (
+          <AchievementPopup 
+            title={achievement.title} 
+            icon={achievement.icon} 
+            onClose={() => setAchievement(null)} 
+          />
         )}
       </AnimatePresence>
 

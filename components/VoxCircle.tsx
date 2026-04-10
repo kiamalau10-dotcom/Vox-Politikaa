@@ -2,6 +2,22 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trash2, Send, MessageCircle, Heart, Share2, UserPlus, Search } from 'lucide-react';
 import { User } from '../types';
+import { 
+  db, 
+  collection, 
+  addDoc, 
+  onSnapshot, 
+  query, 
+  orderBy, 
+  doc, 
+  updateDoc, 
+  deleteDoc, 
+  arrayUnion, 
+  arrayRemove,
+  serverTimestamp,
+  OperationType,
+  handleFirestoreError
+} from '../firebase';
 
 interface Post {
   id: string;
@@ -9,120 +25,168 @@ interface Post {
   displayName: string;
   avatarConfig?: any;
   content: string;
-  timestamp: string;
+  timestamp: any;
   likes: string[]; // array of usernames who liked
-  comments: { username: string; text: string; timestamp: string }[];
+  comments: { username: string; text: string; timestamp: any }[];
   role: 'ADMIN' | 'USER';
+  shares?: number;
 }
 
 const VoxCircle: React.FC<{ currentUser: User | null; isDarkMode: boolean }> = ({ currentUser, isDarkMode }) => {
-  const [posts, setPosts] = useState<Post[]>(() => {
-    const savedPosts = localStorage.getItem('vox_circle_posts');
-    const parsed = savedPosts ? JSON.parse(savedPosts) : [];
-    return parsed.map((p: any) => ({
-      ...p,
-      likes: Array.isArray(p.likes) ? p.likes : [],
-      comments: Array.isArray(p.comments) ? p.comments : []
-    }));
-  });
+  const [posts, setPosts] = useState<Post[]>([]);
   const [newPost, setNewPost] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [commentingOn, setCommentingOn] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');
 
   useEffect(() => {
-    localStorage.setItem('vox_circle_posts', JSON.stringify(posts));
-  }, [posts]);
+    if (!currentUser) return;
+    const path = 'posts';
+    const q = query(collection(db, path), orderBy('timestamp', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedPosts = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Post[];
+      setPosts(fetchedPosts);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    });
 
-  const handlePost = () => {
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  const handlePost = async () => {
     if (!newPost.trim() || !currentUser) return;
 
-    const post: Post = {
-      id: Date.now().toString(),
-      username: currentUser.username,
-      displayName: currentUser.displayName,
-      avatarConfig: currentUser.avatarConfig,
-      content: newPost,
-      timestamp: 'Baru saja',
-      likes: [],
-      comments: [],
-      role: currentUser.role
+    const path = 'posts';
+    try {
+      await addDoc(collection(db, path), {
+        username: currentUser.username,
+        displayName: currentUser.displayName,
+        avatarConfig: currentUser.avatarConfig || null,
+        content: newPost,
+        timestamp: serverTimestamp(),
+        likes: [],
+        comments: [],
+        role: currentUser.role,
+        shares: 0,
+        authorId: currentUser.uid // CRITICAL: Added authorId for security rules
+      });
+      setNewPost('');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, path);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("Hapus postingan ini?")) return;
+    const path = `posts/${id}`;
+    try {
+      await deleteDoc(doc(db, 'posts', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  };
+
+  const handleLike = async (postId: string) => {
+    if (!currentUser) return;
+    const path = `posts/${postId}`;
+    const postRef = doc(db, 'posts', postId);
+    const post = posts.find(p => p.id === postId);
+    if (!post) return;
+
+    const isLiked = post.likes.includes(currentUser.username);
+    try {
+      await updateDoc(postRef, {
+        likes: isLiked ? arrayRemove(currentUser.username) : arrayUnion(currentUser.username)
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleComment = async (postId: string) => {
+    if (!commentText.trim() || !currentUser) return;
+    const path = `posts/${postId}`;
+    const postRef = doc(db, 'posts', postId);
+    try {
+      await updateDoc(postRef, {
+        comments: arrayUnion({
+          username: currentUser.username,
+          text: commentText,
+          timestamp: new Date().toISOString()
+        })
+      });
+      setCommentText('');
+      setCommentingOn(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleShare = async (post: Post) => {
+    const shareData = {
+      title: 'VoxCircle Post',
+      text: `${post.displayName} (@${post.username}): ${post.content}`,
+      url: window.location.href
     };
 
-    setPosts([post, ...posts]);
-    setNewPost('');
-  };
-
-  const handleDelete = (id: string) => {
-    setPosts(posts.filter(p => p.id !== id));
-  };
-
-  const handleLike = (postId: string) => {
-    if (!currentUser) return;
-    setPosts(posts.map(p => {
-      if (p.id === postId) {
-        const liked = p.likes.includes(currentUser.username);
-        return {
-          ...p,
-          likes: liked 
-            ? p.likes.filter(u => u !== currentUser.username)
-            : [...p.likes, currentUser.username]
-        };
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(`${shareData.text}\n\nShared from VoxPolitika`);
+        alert("Link dan konten post berhasil disalin ke clipboard!");
       }
-      return p;
-    }));
+      
+      // Increment share count in Firestore
+      const postRef = doc(db, 'posts', post.id);
+      await updateDoc(postRef, {
+        shares: (post.shares || 0) + 1
+      });
+    } catch (error) {
+      console.error("Error sharing: ", error);
+    }
   };
 
-  const handleComment = (postId: string) => {
-    if (!commentText.trim() || !currentUser) return;
-    setPosts(posts.map(p => {
-      if (p.id === postId) {
-        return {
-          ...p,
-          comments: [...p.comments, {
-            username: currentUser.username,
-            text: commentText,
-            timestamp: 'Baru saja'
-          }]
-        };
-      }
-      return p;
-    }));
-    setCommentText('');
-    setCommentingOn(null);
-  };
-
-  const handleFollow = (targetUsername: string) => {
+  const handleFollow = async (targetUsername: string) => {
     if (!currentUser || currentUser.username === targetUsername) return;
     
-    const savedUserData = localStorage.getItem(`user_data_${currentUser.username}`);
-    if (!savedUserData) return;
-    
-    const user: User = JSON.parse(savedUserData);
-    const following = user.following || [];
-    const isFollowing = following.includes(targetUsername);
-    
-    const newFollowing = isFollowing 
-      ? following.filter(u => u !== targetUsername)
-      : [...following, targetUsername];
-      
-    const updatedUser = { ...user, following: newFollowing };
-    localStorage.setItem(`user_data_${currentUser.username}`, JSON.stringify(updatedUser));
-    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-    
-    // Update target user's followers
-    const targetData = localStorage.getItem(`user_data_${targetUsername}`);
-    if (targetData) {
-      const target: User = JSON.parse(targetData);
-      const followers = target.followers || [];
-      const newFollowers = isFollowing
-        ? followers.filter(u => u !== currentUser.username)
-        : [...followers, currentUser.username];
-      localStorage.setItem(`user_data_${targetUsername}`, JSON.stringify({ ...target, followers: newFollowers }));
-    }
+    try {
+      // 1. Update current user's following list in Firestore
+      // We use the username as the document ID for simplicity in this mapping
+      const currentUserRef = doc(db, 'users', currentUser.username.replace('@', ''));
+      const targetUserRef = doc(db, 'users', targetUsername.replace('@', ''));
 
-    // Trigger storage event for App.tsx
-    window.dispatchEvent(new Event('storage'));
+      const isFollowing = currentUser.following?.includes(targetUsername);
+
+      // Update current user
+      await updateDoc(currentUserRef, {
+        following: isFollowing ? arrayRemove(targetUsername) : arrayUnion(targetUsername)
+      });
+
+      // Update target user
+      await updateDoc(targetUserRef, {
+        followers: isFollowing ? arrayRemove(currentUser.username) : arrayUnion(currentUser.username)
+      });
+
+      // Also update local storage for immediate UI feedback if needed, 
+      // but App.tsx should ideally listen to Firestore for currentUser too.
+      const updatedUser = { 
+        ...currentUser, 
+        following: isFollowing 
+          ? currentUser.following?.filter(u => u !== targetUsername) 
+          : [...(currentUser.following || []), targetUsername] 
+      };
+      localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+      localStorage.setItem(`user_data_${currentUser.username}`, JSON.stringify(updatedUser));
+      
+      window.dispatchEvent(new Event('storage'));
+    } catch (error) {
+      console.error("Error following user: ", error);
+      alert("Gagal mengikuti user. Pastikan Anda sudah terdaftar di database.");
+    }
   };
 
   const filteredPosts = useMemo(() => {
@@ -133,7 +197,21 @@ const VoxCircle: React.FC<{ currentUser: User | null; isDarkMode: boolean }> = (
     );
   }, [posts, searchQuery]);
 
-  const renderAvatar = (config: any, username: string) => {
+  const formatTimestamp = (ts: any) => {
+    if (!ts) return 'Baru saja';
+    if (ts.toDate) {
+      const date = ts.toDate();
+      return date.toLocaleDateString('id-ID', { 
+        day: 'numeric', 
+        month: 'short', 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+    }
+    return ts;
+  };
+
+  const renderAvatar = (username: string) => {
     const avatarUrl = `https://api.dicebear.com/9.x/adventurer/svg?seed=${username}&backgroundColor=f8fafc,f1f5f9&radius=20`;
     
     return (
@@ -257,7 +335,7 @@ const VoxCircle: React.FC<{ currentUser: User | null; isDarkMode: boolean }> = (
                         <span className="px-2 py-0.5 bg-red-600 text-white text-[8px] font-black rounded-full uppercase">Admin</span>
                       )}
                     </div>
-                    <p className="text-[10px] font-bold opacity-40 uppercase tracking-widest">{post.timestamp}</p>
+                    <p className="text-[10px] font-bold opacity-40 uppercase tracking-widest">{formatTimestamp(post.timestamp)}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -303,8 +381,11 @@ const VoxCircle: React.FC<{ currentUser: User | null; isDarkMode: boolean }> = (
                 >
                   <MessageCircle size={16} /> {post.comments.length}
                 </button>
-                <button className="flex items-center gap-2 text-xs font-bold opacity-50 hover:opacity-100 transition-all">
-                  <Share2 size={16} /> Bagikan
+                <button 
+                  onClick={() => handleShare(post)}
+                  className="flex items-center gap-2 text-xs font-bold opacity-50 hover:opacity-100 transition-all"
+                >
+                  <Share2 size={16} /> {post.shares || 0} Bagikan
                 </button>
               </div>
 

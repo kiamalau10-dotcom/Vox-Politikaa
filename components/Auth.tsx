@@ -2,6 +2,15 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { User } from '../types';
 import { Eye, EyeOff } from 'lucide-react';
+import { 
+  auth, 
+  db, 
+  doc, 
+  getDoc, 
+  setDoc, 
+  updateDoc, 
+  signInAnonymously 
+} from '../firebase';
 
 interface AuthProps {
   isDarkMode: boolean;
@@ -13,112 +22,154 @@ const Auth: React.FC<AuthProps> = ({ isDarkMode, onLogin }) => {
   const [isSignUpMode, setIsSignUpMode] = useState(false);
   const [authData, setAuthData] = useState({ username: '', password: '', displayName: '', rememberMe: false });
 
-  const handleAuth = (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Ensure username starts with @
     const formattedUsername = authData.username.startsWith('@') ? authData.username : `@${authData.username}`;
+    const docId = formattedUsername.replace('@', '');
 
-    if (isSignUpMode) {
-      const existingUser = localStorage.getItem(`user_data_${formattedUsername}`);
-      if (existingUser) {
-        alert("Username sudah digunakan!");
-        return;
-      }
-
-      const newUser: User = {
-        username: formattedUsername,
-        displayName: authData.displayName || authData.username,
-        password: authData.password,
-        role: 'USER',
-        level: 1,
-        currentExp: 0,
-        streak: 1,
-        lastLoginDate: new Date().toISOString().split('T')[0],
-        progress: {},
-        quizHistory: [],
-        coins: 100, // Initial coins for regular users
-        streakFreezeCount: 0,
-        followers: [],
-        following: []
-      };
-      localStorage.setItem(`user_data_${formattedUsername}`, JSON.stringify(newUser));
-      
-      const allUsers = JSON.parse(localStorage.getItem('all_users') || '[]');
-      localStorage.setItem('all_users', JSON.stringify([...allUsers, newUser]));
-
-      alert("Akun berhasil dibuat! Silakan login.");
-      setIsSignUpMode(false);
-    } else {
-      // UPDATED ADMIN LIST - MATCHING YOUR REQUEST
-      const admins = [
-        { username: 'superadmin', password: 'devinakialarissa', displayName: 'Dekila' },
-        { username: '@kia', password: 'kiacantik', displayName: 'Kia' },
-        { username: '@larissa', password: 'larissabigayle123', displayName: 'Larissa' },
-        { username: '@devina', password: 'devina321', displayName: 'Devina' }
-      ];
-
-      // Check if the login matches superadmin or others
-      const adminMatch = admins.find(a => 
-        (a.username === authData.username || a.username === formattedUsername) && 
-        a.password === authData.password
-      );
-
-      const savedUserDataStr = localStorage.getItem(`user_data_${formattedUsername}`);
-      let savedUser: User | null = null;
-      if (savedUserDataStr) {
-        savedUser = JSON.parse(savedUserDataStr);
-      }
-      
-      if (adminMatch || (savedUser && savedUser.password === authData.password)) {
-        let user: User;
-        if (adminMatch) {
-          // Setting the Admin with Unlimited Coins and High Level
-          user = {
-            username: adminMatch.username.startsWith('@') ? adminMatch.username : `@${adminMatch.username}`,
-            displayName: adminMatch.displayName,
-            password: adminMatch.password,
-            role: 'ADMIN', // This will change the red label to ADMIN
-            level: 999,
-            currentExp: 0,
-            streak: 1,
-            lastLoginDate: new Date().toISOString().split('T')[0],
-            progress: {},
-            quizHistory: [],
-            coins: 9999999, // UNLIMITED COINS FOR ADMIN
-            streakFreezeCount: 99,
-            followers: [],
-            following: []
-          };
-        } else {
-          user = savedUser!;
-        }
-        
-        // Streak Logic
-        const today = new Date().toISOString().split('T')[0];
-        const yesterdayDate = new Date();
-        yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-        const yesterday = yesterdayDate.toISOString().split('T')[0];
-
-        if (user.lastLoginDate === yesterday) {
-          user.streak = (user.streak || 0) + 1;
-        } else if (user.lastLoginDate !== today && user.lastLoginDate !== '') {
-          if (user.streakFreezeCount && user.streakFreezeCount > 0) {
-            user.streakFreezeCount -= 1;
+    try {
+      // Sign in anonymously to get a Firebase UID for security rules if not already signed in
+      let uid = auth.currentUser?.uid || '';
+      if (!uid) {
+        try {
+          const userCredential = await signInAnonymously(auth);
+          uid = userCredential.user.uid;
+        } catch (err: any) {
+          // Don't block the flow, but warn the user if it's the restricted operation error
+          if (err.code === 'auth/admin-restricted-operation') {
+            console.warn("Anonymous Authentication is disabled in Firebase Console. Real-time sync may be limited.");
           } else {
-            user.streak = 1;
+            console.error("Auth error: ", err);
           }
         }
-        user.lastLoginDate = today;
-
-        (user as any).rememberMe = authData.rememberMe;
-        
-        // Save back to local storage so it persists
-        localStorage.setItem(`user_data_${user.username}`, JSON.stringify(user));
-        onLogin(user);
-      } else {
-        alert("Username atau Password salah!");
       }
+
+      if (isSignUpMode) {
+        const userDoc = await getDoc(doc(db, 'users', docId));
+        if (userDoc.exists()) {
+          alert("Username sudah digunakan!");
+          return;
+        }
+
+        const newUser: User = {
+          username: formattedUsername,
+          displayName: authData.displayName || authData.username,
+          password: authData.password,
+          role: 'USER',
+          level: 1,
+          currentExp: 0,
+          streak: 1,
+          lastLoginDate: new Date().toISOString().split('T')[0],
+          progress: {},
+          quizHistory: [],
+          coins: 100,
+          streakFreezeCount: 0,
+          followers: [],
+          following: [],
+          uid: uid // Store the UID if we have it
+        };
+
+        await setDoc(doc(db, 'users', docId), newUser);
+        
+        // Also update local storage for compatibility
+        localStorage.setItem(`user_data_${formattedUsername}`, JSON.stringify(newUser));
+        const allUsers = JSON.parse(localStorage.getItem('all_users') || '[]');
+        localStorage.setItem('all_users', JSON.stringify([...allUsers, newUser]));
+
+        alert("Akun berhasil dibuat! Silakan login.");
+        setIsSignUpMode(false);
+      } else {
+        // UPDATED ADMIN LIST
+        const admins = [
+          { username: 'superadmin', password: 'devinakialarissa', displayName: 'Dekila' },
+          { username: '@kia', password: 'kiacantik', displayName: 'Kia' },
+          { username: '@larissa', password: 'larissabigayle123', displayName: 'Larissa' },
+          { username: '@devina', password: 'devina321', displayName: 'Devina' }
+        ];
+
+        const adminMatch = admins.find(a => 
+          (a.username.toLowerCase() === authData.username.toLowerCase() || 
+           a.username.toLowerCase() === formattedUsername.toLowerCase()) && 
+          a.password === authData.password
+        );
+
+        const userDoc = await getDoc(doc(db, 'users', docId));
+        let savedUser: User | null = userDoc.exists() ? userDoc.data() as User : null;
+
+        // Fallback to localStorage if not in Firestore yet (for existing users)
+        if (!savedUser) {
+          const localData = localStorage.getItem(`user_data_${formattedUsername}`);
+          if (localData) savedUser = JSON.parse(localData);
+        }
+        
+        if (adminMatch || (savedUser && savedUser.password === authData.password)) {
+          let user: User;
+          if (adminMatch) {
+            user = {
+              username: adminMatch.username.startsWith('@') ? adminMatch.username : `@${adminMatch.username}`,
+              displayName: adminMatch.displayName,
+              password: adminMatch.password,
+              role: 'ADMIN',
+              level: 999,
+              currentExp: 0,
+              streak: 1,
+              lastLoginDate: new Date().toISOString().split('T')[0],
+              progress: {},
+              quizHistory: [],
+              coins: 9999999,
+              streakFreezeCount: 99,
+              followers: [],
+              following: [],
+              uid: uid
+            };
+            // Sync admin to Firestore if not exists
+            await setDoc(doc(db, 'users', docId), user, { merge: true });
+          } else {
+            user = savedUser!;
+            // Update UID if it's missing (for legacy users)
+            if (!user.uid) {
+              user.uid = uid;
+              await updateDoc(doc(db, 'users', docId), { uid: uid });
+            }
+          }
+          
+          // Streak Logic
+          const today = new Date().toISOString().split('T')[0];
+          const yesterdayDate = new Date();
+          yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+          const yesterday = yesterdayDate.toISOString().split('T')[0];
+
+          if (user.lastLoginDate === yesterday) {
+            user.streak = (user.streak || 0) + 1;
+          } else if (user.lastLoginDate !== today && user.lastLoginDate !== '') {
+            if (user.streakFreezeCount && user.streakFreezeCount > 0) {
+              user.streakFreezeCount -= 1;
+            } else {
+              user.streak = 1;
+            }
+          }
+          user.lastLoginDate = today;
+          (user as any).rememberMe = authData.rememberMe;
+          
+          // Sync to Firestore
+          await updateDoc(doc(db, 'users', docId), { 
+            lastLoginDate: today, 
+            streak: user.streak, 
+            streakFreezeCount: user.streakFreezeCount || 0,
+            lastActive: new Date().toISOString()
+          });
+
+          localStorage.setItem(`user_data_${user.username}`, JSON.stringify(user));
+          onLogin(user);
+        } else {
+          alert("Username atau Password salah!");
+        }
+      }
+    } catch (error) {
+      console.error("Auth error: ", error);
+      alert("Terjadi kesalahan saat autentikasi. Silakan coba lagi.");
     }
   };
 
