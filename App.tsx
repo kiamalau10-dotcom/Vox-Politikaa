@@ -16,10 +16,11 @@ import Quiz from './components/Quiz';
 import Dashboard from './components/Dashboard';
 import ProgramSection from './components/ProgramSection';
 import { MessageSquare, Send } from 'lucide-react';
-import { db, doc, onSnapshot, OperationType, handleFirestoreError } from './firebase';
 import ErrorBoundary from './components/ErrorBoundary';
 
 import { CMSProvider, useCMS } from './components/CMSContext';
+import { UserProvider } from './components/UserContext';
+import { useUser } from './components/useUser';
 
 const Content = ({ 
   activeSection, 
@@ -138,17 +139,9 @@ const LegalModal: React.FC<{
 
 const AppContent: React.FC = () => {
   const { isEditMode, setIsEditMode } = useCMS();
+  const { currentUser, setCurrentUser, isLoggedIn, setIsLoggedIn, logout } = useUser();
   const [legalModal, setLegalModal] = useState<{ title: string; content: React.ReactNode } | null>(null);
-  // --- STATE AUTH ---
-  const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    const remembered = localStorage.getItem("isLoggedIn") === "true";
-    const sessioned = sessionStorage.getItem("isLoggedIn") === "true";
-    return remembered || sessioned;
-  });
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const savedUser = localStorage.getItem("currentUser") || sessionStorage.getItem("currentUser");
-    return savedUser ? JSON.parse(savedUser) : null;
-  });
+  
   // --- STATE TEMA & NAVIGASI ---
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const savedTheme = localStorage.getItem("theme");
@@ -201,47 +194,15 @@ const AppContent: React.FC = () => {
   };
 
   const handleLogout = () => {
-    setIsLoggedIn(false);
-    setCurrentUser(null);
-    localStorage.removeItem("isLoggedIn");
-    localStorage.removeItem("currentUser");
-    sessionStorage.removeItem("isLoggedIn");
-    sessionStorage.removeItem("currentUser");
+    logout();
     setActiveSection(AppSection.HOME);
   };
 
   // Sync currentUser from Firestore in real-time
-  useEffect(() => {
-    if (isLoggedIn && currentUser?.username) {
-      const docId = currentUser.username.replace('@', '');
-      const path = `users/${docId}`;
-      const unsubscribe = onSnapshot(doc(db, 'users', docId), (docSnap) => {
-        if (docSnap.exists()) {
-          const userData = docSnap.data() as User;
-          setCurrentUser(userData);
-          localStorage.setItem("currentUser", JSON.stringify(userData));
-          localStorage.setItem(`user_data_${userData.username}`, JSON.stringify(userData));
-        }
-      }, (error) => {
-        handleFirestoreError(error, OperationType.GET, path);
-      });
-      return () => unsubscribe();
-    }
-  }, [isLoggedIn, currentUser?.username]);
+  // (Moved to UserContext)
 
   // Sync currentUser from localStorage (for updates from other components)
-  useEffect(() => {
-    const handleStorageChange = () => {
-      const savedUser = localStorage.getItem("currentUser");
-      if (savedUser) {
-        setCurrentUser(JSON.parse(savedUser));
-      }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-    };
-  }, []);
+  // (Moved to UserContext)
 
   const handleSendFeedback = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -458,7 +419,9 @@ const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <CMSProvider>
-        <AppContent />
+        <UserProvider>
+          <AppContent />
+        </UserProvider>
       </CMSProvider>
     </ErrorBoundary>
   );

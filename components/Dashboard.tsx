@@ -4,6 +4,7 @@ import { Shield, History, TrendingUp, MessageSquare, Users, Award, LogOut, Flame
 import { User, Feedback } from '../types';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { useCMS } from './CMSContext';
+import { useUser } from './useUser';
 
 import { 
   db, 
@@ -238,7 +239,8 @@ const Dashboard: React.FC<{
   isDarkMode: boolean, 
   currentUser: User | null,
   onLogout: () => void
-}> = ({ isDarkMode, currentUser, onLogout }) => {
+}> = ({ isDarkMode, onLogout }) => {
+  const { currentUser, logout } = useUser();
   const { isEditMode, setIsEditMode } = useCMS();
   const role = currentUser?.role;
   const username = currentUser?.username;
@@ -383,9 +385,13 @@ const Dashboard: React.FC<{
         const today = now.toISOString().split('T')[0];
         const newUsers = users.filter(u => u.lastLoginDate === today).length;
         
+        // For "Active Now", we'll use users who logged in today as a proxy 
+        // since we don't have a real heartbeat system.
+        const activeToday = users.filter(u => u.lastLoginDate === today).length;
+
         setLiveStats(prev => ({
           ...prev,
-          activeNow: Math.floor(users.length * 0.3) + 1, // Simulated active users based on total
+          activeNow: activeToday || 1,
           newUsersToday: newUsers
         }));
       }, (error) => {
@@ -575,7 +581,7 @@ const Dashboard: React.FC<{
               Vox-Studio {isVoxStudioEnabled ? 'ON' : 'OFF'}
             </button>
             <button 
-              onClick={onLogout}
+              onClick={() => { logout(); onLogout(); }}
               className="flex items-center gap-2 bg-zinc-900 text-white px-6 py-3 rounded-xl font-bold text-xs uppercase hover:bg-red-600 transition-all"
             >
               <LogOut size={16} /> Logout
@@ -583,7 +589,7 @@ const Dashboard: React.FC<{
           </div>
         ) : (
           <button 
-            onClick={onLogout}
+            onClick={() => { logout(); onLogout(); }}
             className="flex items-center gap-2 bg-zinc-900 text-white px-6 py-3 rounded-xl font-bold text-xs uppercase hover:bg-red-600 transition-all"
           >
             <LogOut size={16} /> Logout

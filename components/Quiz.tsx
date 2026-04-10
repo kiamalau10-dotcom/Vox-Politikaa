@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle2, XCircle, Trophy, ArrowRight, RotateCcw, ShieldAlert, Medal, Zap, Star, Mountain } from 'lucide-react';
 import { Question, User } from '../types';
 import { ALL_QUESTIONS } from '../services/quizData';
+import { useUser } from './useUser';
 import { 
   db, 
   collection, 
@@ -91,7 +92,8 @@ const Quiz: React.FC<{
   isDarkMode: boolean, 
   currentUser: User | null,
   onStateChange?: (isActive: boolean) => void 
-}> = ({ isDarkMode, currentUser, onStateChange }) => {
+}> = ({ isDarkMode, onStateChange }) => {
+  const { currentUser } = useUser();
   const [currentStep, setCurrentStep] = useState<'start' | 'playing' | 'result'>('start');
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -106,15 +108,22 @@ const Quiz: React.FC<{
   useEffect(() => {
     if (!currentUser) return;
     const path = 'users';
+    // Fetch more to filter admins in memory if needed, 
+    // but better to fetch only users if possible.
+    // Firestore doesn't support where('role', '!=', 'ADMIN') without index + orderBy role.
+    // We'll fetch top 20 and filter.
     const q = query(
       collection(db, path),
       orderBy('level', 'desc'),
       orderBy('currentExp', 'desc'),
-      limit(5)
+      limit(20)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const users = snapshot.docs.map(doc => doc.data() as User);
+      const users = snapshot.docs
+        .map(doc => doc.data() as User)
+        .filter(u => u.role !== 'ADMIN')
+        .slice(0, 5);
       setLeaderboardData(users);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, path);
