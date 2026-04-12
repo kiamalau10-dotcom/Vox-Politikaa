@@ -81,12 +81,9 @@ const Auth: React.FC<AuthProps> = ({ isDarkMode, onLogin }) => {
         alert("Akun berhasil dibuat! Silakan login.");
         setIsSignUpMode(false);
       } else {
-        // UPDATED ADMIN LIST
+        // UPDATED ADMIN LIST - STRICT VALIDATION
         const admins = [
-          { username: 'superadmin', password: 'devinakialarissa', displayName: 'Dekila' },
-          { username: '@kia', password: 'kiacantik', displayName: 'Kia' },
-          { username: '@larissa', password: 'larissabigayle123', displayName: 'Larissa' },
-          { username: '@devina', password: 'devina321', displayName: 'Devina' }
+          { username: 'superadmin', password: 'devinakialarissa', displayName: 'Dekila' }
         ];
 
         const adminMatch = admins.find(a => 

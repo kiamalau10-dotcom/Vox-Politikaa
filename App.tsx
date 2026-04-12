@@ -16,6 +16,7 @@ import Quiz from './components/Quiz';
 import Dashboard from './components/Dashboard';
 import ProgramSection from './components/ProgramSection';
 import { MessageSquare, Send } from 'lucide-react';
+import { db, collection, addDoc, OperationType, handleFirestoreError } from './firebase';
 import ErrorBoundary from './components/ErrorBoundary';
 
 import { CMSProvider, useCMS } from './components/CMSContext';
@@ -204,19 +205,24 @@ const AppContent: React.FC = () => {
   // Sync currentUser from localStorage (for updates from other components)
   // (Moved to UserContext)
 
-  const handleSendFeedback = useCallback((e: React.FormEvent) => {
+  const handleSendFeedback = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    const allFeedbacks = JSON.parse(localStorage.getItem('all_feedbacks') || '[]');
-    const newFeedback = {
-      id: Date.now().toString(),
-      username: currentUser?.username || 'Anonymous',
-      message: feedback,
-      date: new Date().toISOString().split('T')[0]
-    };
-    localStorage.setItem('all_feedbacks', JSON.stringify([newFeedback, ...allFeedbacks]));
-    setIsSent(true);
-    setFeedback('');
-    setTimeout(() => setIsSent(false), 3000);
+    if (!feedback.trim()) return;
+
+    const path = 'feedbacks';
+    try {
+      await addDoc(collection(db, path), {
+        username: currentUser?.username || 'Anonymous',
+        message: feedback,
+        date: new Date().toISOString().split('T')[0],
+        timestamp: new Date().toISOString()
+      });
+      setIsSent(true);
+      setFeedback('');
+      setTimeout(() => setIsSent(false), 3000);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, path);
+    }
   }, [feedback, currentUser]);
 
   if (!isLoggedIn) {

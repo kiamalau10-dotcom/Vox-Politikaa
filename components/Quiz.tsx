@@ -272,9 +272,13 @@ const Quiz: React.FC<{
             quizId: `quiz_${Date.now()}`,
             score: finalScore,
             date: new Date().toISOString(),
-            topic: "Literasi Politik"
+            topic: "Literasi Politik",
+            username: updatedUser.username
           };
           updatedUser.quizHistory = [quizResult, ...updatedUser.quizHistory].slice(0, 50);
+
+          // Save to global results for admin
+          await addDoc(collection(db, 'quiz_results'), quizResult);
 
           // Achievement Check
           if (leveledUp && updatedUser.level === 5) {

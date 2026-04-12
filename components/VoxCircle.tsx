@@ -351,13 +351,24 @@ const VoxCircle: React.FC<{ currentUser: User | null; isDarkMode: boolean }> = (
                       <UserPlus size={16} />
                     </button>
                   )}
-                  {(currentUser?.role === 'ADMIN' || currentUser?.username === post.username) && (
+                  
+                  {/* Admin Specific Delete Button */}
+                  {currentUser?.role === 'ADMIN' ? (
                     <button 
                       onClick={() => handleDelete(post.id)}
-                      className="p-2 rounded-xl bg-zinc-800 text-zinc-400 hover:bg-red-600 hover:text-white transition-all"
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 text-white font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all shadow-lg shadow-red-600/20"
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={12} /> Hapus (Admin)
                     </button>
+                  ) : (
+                    currentUser?.username === post.username && (
+                      <button 
+                        onClick={() => handleDelete(post.id)}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 text-white font-black text-[10px] uppercase tracking-widest hover:bg-red-600 transition-all shadow-lg"
+                      >
+                        <Trash2 size={12} /> Hapus
+                      </button>
+                    )
                   )}
                 </div>
               </div>

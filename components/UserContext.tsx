@@ -23,6 +23,15 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const unsubscribe = onSnapshot(doc(db, 'users', docId), (docSnap) => {
         if (docSnap.exists()) {
           const userData = docSnap.data() as User;
+          
+          // STRICT ADMIN VALIDATION
+          if (userData.role === 'ADMIN' && userData.username.toLowerCase() !== '@superadmin' && userData.username.toLowerCase() !== 'superadmin') {
+            console.error("Unauthorized admin access detected. Downgrading role.");
+            userData.role = 'USER';
+            // Optionally update Firestore too
+            updateDoc(doc(db, 'users', docId), { role: 'USER' });
+          }
+
           setCurrentUser(userData);
           localStorage.setItem("currentUser", JSON.stringify(userData));
           localStorage.setItem(`user_data_${userData.username}`, JSON.stringify(userData));
