@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '../types';
-import { db, doc, onSnapshot, OperationType, handleFirestoreError } from '../firebase';
+import { db, doc, onSnapshot, updateDoc, OperationType, handleFirestoreError } from '../firebase';
 import { UserContext } from './UserContextCore';
 
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

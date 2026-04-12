@@ -211,8 +211,10 @@ const VoxCircle: React.FC<{ currentUser: User | null; isDarkMode: boolean }> = (
     return ts;
   };
 
-  const renderAvatar = (username: string) => {
-    const avatarUrl = `https://api.dicebear.com/9.x/adventurer/svg?seed=${username}&backgroundColor=f8fafc,f1f5f9&radius=20`;
+  const renderAvatar = (costumeId: any, username: string) => {
+    const avatarUrl = costumeId === 'none' || !costumeId
+      ? `https://api.dicebear.com/9.x/adventurer/svg?seed=${username}&backgroundColor=f8fafc,f1f5f9&radius=20`
+      : costumeId;
     
     return (
       <div className="w-12 h-12 rounded-2xl bg-red-600/10 overflow-hidden border-2 border-red-600/20 shrink-0">

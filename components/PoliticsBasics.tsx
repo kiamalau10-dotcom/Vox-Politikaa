@@ -2,10 +2,9 @@ import React, { useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  History, CheckCircle2, ArrowLeft, ChevronRight, Award,
-  TrendingUp, TrendingDown, Scale, Landmark, Users, Search,
+  CheckCircle2, ArrowLeft, ChevronRight, Award,
+  Scale, Landmark, Users, Search,
   BookOpen, Brain, ChevronDown, ChevronUp, Star, AlertCircle,
-  Globe, Shield, Gavel, Building2, Vote,
 } from 'lucide-react';
 
 // ============================================================
@@ -2617,18 +2616,10 @@ const PoliticsBasics = () => {
   const [activeTokoh, setActiveTokoh] = useState(null);
   const [completedModules, setCompletedModules] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeCategory, setActiveCategory] = useState('all');
 
   const handleComplete = (id) => {
     if (!completedModules.includes(id)) setCompletedModules(prev => [...prev, id]);
   };
-
-  const categories = [
-    { id: 'all', label: 'Semua', icon: <BookOpen size={14} /> },
-    { id: 'dasar', label: 'Dasar Tata Negara', icon: <Landmark size={14} /> },
-    { id: 'ideologi', label: 'Ideologi & Hukum', icon: <Scale size={14} /> },
-    { id: 'publik', label: 'Partisipasi Publik', icon: <Users size={14} /> },
-  ];
 
   const cat1 = modules.slice(0, 6);
   const cat2 = modules.slice(6, 12);
